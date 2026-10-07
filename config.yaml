@@ -1,0 +1,93 @@
+# ==============================================================================
+# Fraud/Anomaly Detection with Drift Monitoring - Global Configuration
+# ==============================================================================
+
+project:
+  name: "fraud-drift-monitoring"
+  random_seed: 42
+
+data:
+  raw_path: "data/creditcard.csv"
+  time_col: "Time"
+  target_col: "Class"
+  amount_col: "Amount"
+  # Time-aware split: first 80% chronologically for training/validation, last 20% for test
+  test_size: 0.20
+  cv_splits: 5
+  scaler: "robust" # RobustScaler handles heavy-tailed financial amounts without leakage
+
+imbalance:
+  # Strategies to evaluate:
+  # - 'none': unweighted baseline
+  # - 'class_weight': cost-sensitive learning via scale_pos_weight
+  # - 'smote': synthetic minority oversampling inside CV folds only
+  # - 'unsupervised': unsupervised anomaly detection
+  methods:
+    - "none"
+    - "class_weight"
+    - "smote"
+    - "unsupervised"
+  smote_sampling_strategy: 0.10
+
+models:
+  xgboost:
+    n_estimators: 150
+    max_depth: 4
+    learning_rate: 0.08
+    subsample: 0.85
+    colsample_bytree: 0.85
+    eval_metric: "logloss"
+    # Will be dynamically set or default to negative/positive ratio (~580 for 0.17% fraud)
+    scale_pos_weight: 580.0
+  isolation_forest:
+    n_estimators: 150
+    contamination: 0.0017
+    max_samples: 0.8
+    random_state: 42
+  autoencoder:
+    hidden_dims: [20, 10, 20]
+    epochs: 15
+    batch_size: 256
+    learning_rate: 0.003
+    random_state: 42
+
+thresholds:
+  # Cost parameters for financial decision analysis
+  # Mode: 'amount' computes FN cost as actual transaction Amount; 'fixed' uses false_negative_fixed
+  false_negative_mode: "amount"
+  false_negative_fixed: 100.0
+  false_positive_fixed: 5.0
+  true_positive_fixed: 2.0
+  true_negative_fixed: 0.0
+  sweep_steps: 100
+
+drift:
+  # Reference vs Later window definition for monitoring
+  reference_ratio: 0.60 # First 60% of test window as baseline reference
+  psi_bins: 10
+  psi_thresholds:
+    no_drift: 0.10      # PSI < 0.10: negligible shift
+    moderate_drift: 0.20 # 0.10 <= PSI < 0.20: moderate shift, investigate
+    severe_drift: 0.25   # PSI >= 0.25: significant distributional change
+  ks_alpha: 0.01        # Significance level for two-sample Kolmogorov-Smirnov test
+  score_drift_psi_threshold: 0.20
+  score_drift_ks_p_threshold: 0.01
+  pr_auc_drop_threshold: 0.15 # 15% drop triggers severe alert
+  max_drifted_features_allowed: 3
+
+alerts:
+  # Rules mapping drift indicators to severity & recommended action
+  # Recommended actions: 'OK', 'MONITOR', 'RETRAIN'
+  severity_rules:
+    retrain:
+      min_severe_features: 3
+      score_psi_threshold: 0.25
+      pr_auc_relative_drop: 0.15
+    monitor:
+      min_moderate_features: 2
+      score_psi_threshold: 0.15
+      pr_auc_relative_drop: 0.08
+
+retrain:
+  window_type: "sliding" # 'sliding' window or 'expanding'
+  window_ratio: 0.50
